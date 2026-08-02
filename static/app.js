@@ -1,7 +1,8 @@
 /* sttl frontend: SSE-driven progressive UI. */
 const $ = (id) => document.getElementById(id);
 const QUICK = new URLSearchParams(location.search).has("quick");
-const state = { status: "idle", segments: [], windows: [], unified: [], elapsed: 0, calib: {} };
+const state = { status: "idle", segments: [], windows: [], unified: [], elapsed: 0, calib: {},
+                cursor: 0, predictions: {} };
 let levelHist = [];
 let timerBase = 0, timerAnchor = null;
 
@@ -84,19 +85,52 @@ function renderTimeline() {
 
 function renderUnified() {
   const u = $("unified");
-  if (!state.unified.length) {
-    u.innerHTML = '<span class="placeholder">' +
-      (state.status === "idle" ? "Press Start (or Space) to begin." :
-        "Listening… unified transcript appears after ~1 minute of speech.") + "</span>";
-    return;
-  }
   u.innerHTML = "";
+  let has = false;
   for (const c of state.unified) {
     const d = document.createElement("div");
     d.className = "chunk" + (c.fallback ? " fallback" : "");
     d.title = c.fallback ? "LLM unify failed — raw Pass A text" : "";
     d.textContent = c.text;
     u.appendChild(d);
+    has = true;
+  }
+  // tail: single-pass text past the unify cursor, then the live prediction
+  const singles = [];
+  for (let i = state.cursor; i < state.segments.length; i++) {
+    const s = state.segments[i];
+    if (s && s.passA) singles.push(s.passA);
+  }
+  const preds = Object.keys(state.predictions).map(Number).sort((a, b) => a - b)
+    .filter(i => {
+      const s = state.segments[i];
+      return !(s && (s.passA != null || ["empty", "failed", "done"].includes(s.state)));
+    })
+    .map(i => state.predictions[i]);
+  if (singles.length || preds.length) {
+    const tail = document.createElement("div");
+    tail.className = "chunk";
+    if (singles.length) {
+      const sp = document.createElement("span");
+      sp.className = "u-single";
+      sp.title = "one pass done — solidifies after the LLM merge";
+      sp.textContent = singles.join(" ") + " ";
+      tail.appendChild(sp);
+    }
+    if (preds.length && (state.status === "recording" || state.status === "paused")) {
+      const pr = document.createElement("span");
+      pr.className = "u-predict";
+      pr.title = "live guess — will be re-transcribed";
+      pr.textContent = preds.join(" ");
+      tail.appendChild(pr);
+    }
+    if (tail.childNodes.length) { u.appendChild(tail); has = true; }
+  }
+  if (!has) {
+    u.innerHTML = '<span class="placeholder">' +
+      (state.status === "idle" ? "Press Start (or Space) to begin." :
+        "Listening… words appear within a few seconds.") + "</span>";
+    return;
   }
   u.scrollTop = u.scrollHeight;
 }
@@ -169,12 +203,18 @@ function connect() {
       drawMeter();
     } else if (m.type === "segment") {
       state.segments[m.segment.i] = m.segment;
-      renderTimeline(); renderPasses();
+      const s = m.segment;
+      if (s.passA != null || ["empty", "failed"].includes(s.state)) delete state.predictions[s.i];
+      renderTimeline(); renderPasses(); renderUnified();
     } else if (m.type === "window") {
       state.windows[m.window.i] = m.window;
       renderPasses();
     } else if (m.type === "unified") {
       state.unified.push(m.chunk);
+      if (m.cursor != null) state.cursor = Math.max(state.cursor, m.cursor);
+      renderUnified();
+    } else if (m.type === "predict") {
+      state.predictions[m.i] = m.text;
       renderUnified();
     } else if (m.type === "calib") {
       state.calib = m; renderCalib();
@@ -182,6 +222,8 @@ function connect() {
       if (m.status === "recording" && m.session) resetSession();
       setStatus(m.status);
       if (m.status === "done") {
+        state.predictions = {};
+        renderUnified();
         toast("Done — transcript copied to clipboard");
         if (QUICK) setTimeout(() => window.close(), 1500);
       }
@@ -197,6 +239,7 @@ function connect() {
 
 function resetSession() {
   state.segments = []; state.windows = []; state.unified = []; state.calib = {};
+  state.cursor = 0; state.predictions = {};
   state.elapsed = 0; timerBase = 0; levelHist = [];
   $("meterNote").textContent = "speak normally for the first few seconds — it calibrates the silence detector";
   renderAll();
@@ -208,6 +251,8 @@ async function loadState() {
     Object.assign(state, {
       segments: s.segments || [], windows: s.windows || [], unified: s.unified || [],
       calib: s.calib || {}, elapsed: s.elapsed || 0, sid: s.id,
+      cursor: s.unify_cursor || 0,
+      predictions: s.prediction ? { [s.prediction.i]: s.prediction.text } : {},
     });
     timerBase = state.elapsed;
     setStatus(s.status);
@@ -274,6 +319,8 @@ async function showHistory() {
       state.segments = full.segments || [];
       state.windows = full.windows || [];
       state.sid = full.id;
+      state.cursor = full.unify_cursor ?? state.segments.length;
+      state.predictions = {};
       renderAll();
       $("historyOverlay").classList.remove("open");
       toast("Loaded " + s.id);

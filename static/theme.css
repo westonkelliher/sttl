@@ -10,6 +10,11 @@
   --text-dim:    #8a949d;
   --text-faint:  #5a636b;
 
+  /* unified-pane tiers: finalized (both passes) / single-pass / predicted */
+  --text-final:   #d5dce2;
+  --text-single:  #9fbdd3;
+  --text-predict: #c2a06a;
+
   --accent:      #6ec8e6;   /* recording cyan */
   --accent-dim:  #3a6a7a;
   --green:       #5ec76a;   /* done / success */

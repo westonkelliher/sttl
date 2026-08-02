@@ -40,7 +40,7 @@ MODEL_NAME = os.environ.get("STTL_MODEL", "medium")       # pass A
 BEAM = int(os.environ.get("STTL_BEAM", "5"))
 MODEL_NAME_B = os.environ.get("STTL_MODEL_B", "small")     # pass B: different model+beam
 BEAM_B = int(os.environ.get("STTL_BEAM_B", "8"))           # so the passes err differently
-UNIFY_MIN = int(os.environ.get("STTL_UNIFY_MIN", "3"))   # segments per LLM call (min)
+UNIFY_MIN = int(os.environ.get("STTL_UNIFY_MIN", "2"))   # segments per LLM call (min)
 UNIFY_MAX = int(os.environ.get("STTL_UNIFY_MAX", "6"))
 PORT = int(os.environ.get("STTL_PORT", "7737"))
 DATA_DIR = Path(os.environ.get("STTL_DATA", os.path.expanduser("~/.local/share/sttl")))
@@ -49,6 +49,8 @@ FAKE_LLM = os.environ.get("STTL_FAKE_LLM") == "1"
 INPUT_WAV = os.environ.get("STTL_INPUT_WAV")             # test: feed wav instead of mic
 INPUT_SPEED = float(os.environ.get("STTL_SPEED", "1"))   # test: >1 feeds faster than realtime
 VAD_MODE = os.environ.get("STTL_VAD", "auto")            # auto = Silero neural, else "energy"
+PREDICT = os.environ.get("STTL_PREDICT", "1") == "1"     # live best-guess tail
+PREDICT_EVERY = float(os.environ.get("STTL_PREDICT_EVERY", "2.5"))
 KEY_FILE = os.path.expanduser("~/.keys/.minimax2.5_tool_caller")
 MINIMAX_URL = "https://api.minimax.io/v1/chat/completions"
 
@@ -331,6 +333,9 @@ class Session:
         self._rec_proc = None
         self._buf = []
         self._buf_n = 0
+        self.prediction = None             # live best-guess for the in-progress segment
+        self._predict_busy = False
+        self._last_predict = 0.0
         self._rec_thread = threading.Thread(target=self._record_loop, daemon=True)
         self._work_thread = threading.Thread(target=self._work_loop, daemon=True)
         self._unify_thread = threading.Thread(target=self._unify_loop, daemon=True)
@@ -378,6 +383,15 @@ class Session:
                 self.broadcast({"type": "level", "rms": round(lvl, 1),
                                 "threshold": round(self.calib.threshold, 1),
                                 "elapsed": self.elapsed()})
+                # live prediction: cheap greedy STT on the in-progress buffer
+                if (PREDICT and not self._predict_busy and n >= RATE
+                        and time.time() - self._last_predict >= PREDICT_EVERY):
+                    self._last_predict = time.time()
+                    self._predict_busy = True
+                    with self.lock:
+                        pbuf = np.concatenate(self._buf)
+                        pidx = len(self.segments)
+                    threading.Thread(target=self._predict, args=(pbuf, pidx), daemon=True).start()
                 # prefer cutting at a quiet moment once near full; hard cut at 125%
                 if (n >= SEG_SAMPLES_SOFT and lvl < self.calib.threshold) or n >= SEG_SAMPLES_HARD:
                     self._flush_buffer()
@@ -422,12 +436,11 @@ class Session:
         if i >= 1:
             self.windows.append({"i": i - 1, "state": "pending", "text": None})
         self.broadcast({"type": "segment", "segment": self._seg_public(seg)})
-        # analyze immediately (cheap); defer STT until this segment isn't the newest
+        # transcribe pass A right away (realtime feel); window i-1 has both halves now
         self._enqueue(("analyze", i))
+        self._enqueue(("passA", i))
         if i >= 1:
-            self._enqueue(("passA", i - 1))
-            if i >= 2:
-                self._enqueue(("passB", i - 2))
+            self._enqueue(("passB", i - 1))
         self._save_state()
 
     def _finalize_schedule(self):
@@ -436,12 +449,7 @@ class Session:
             if self.status == "error":
                 return
             self.status = "finalizing"
-            n = len(self.segments)
-            if n >= 1:
-                self._enqueue(("passA", n - 1))
-            if n >= 2:
-                self._enqueue(("passB", n - 2))
-            self._enqueue(("finish", None))
+            self._enqueue(("finish", None))   # per-segment jobs were queued at close time
         self.broadcast({"type": "status", "status": "finalizing"})
 
     # ---------------- workers
@@ -506,6 +514,21 @@ class Session:
                 if (left is None or left["state"] in term_w) and \
                    (right is not None and right["state"] in term_w):
                     del self.raw[i]
+
+    def _predict(self, buf: np.ndarray, idx: int):
+        """Cheap greedy STT on the in-progress buffer → live 'predicted' tail in the UI."""
+        try:
+            trimmed, _, sec, _m = trim_speech(buf, self.calib)
+            if sec >= 0.3:
+                text = self.trans.transcribe(trimmed, MODEL_NAME_B, 1)
+                if text:
+                    with self.lock:
+                        self.prediction = {"i": idx, "text": text}
+                    self.broadcast({"type": "predict", "i": idx, "text": text})
+        except Exception:
+            pass
+        finally:
+            self._predict_busy = False
 
     def _job_analyze(self, i):
         seg = self.segments[i]
@@ -667,7 +690,7 @@ class Session:
                 self.unify_cursor = v
                 chunk = {"span": span, "text": text, "fallback": fallback}
                 self.unified.append(chunk)
-            self.broadcast({"type": "unified", "chunk": chunk})
+            self.broadcast({"type": "unified", "chunk": chunk, "cursor": v})
             self._save_state()
 
     # ---------------- controls & state
@@ -722,6 +745,8 @@ class Session:
                 "segments": [self._seg_public(s) for s in self.segments],
                 "windows": self.windows,
                 "unified": self.unified,
+                "unify_cursor": self.unify_cursor,
+                "prediction": self.prediction,
                 "model": f"{MODEL_NAME}/b{BEAM} + {MODEL_NAME_B}/b{BEAM_B}",
                 "seg_seconds": SEG_SECONDS,
             }

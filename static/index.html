@@ -58,6 +58,9 @@
     <p>Long-form dictation. Audio is saved every ~8s. Silence is cut (with a safety buffer).
     Each region is transcribed twice — aligned windows and half-offset windows — and an LLM
     merges both passes into the unified transcript, progressively.</p>
+    <p>Transcript colors: <b>white</b> = finalized (both passes merged) ·
+    <b style="color:var(--text-single)">blue</b> = one pass done ·
+    <i style="color:var(--text-predict)">amber italic</i> = live prediction.</p>
     <table>
       <tr><td>Space</td><td>start / pause / resume</td></tr>
       <tr><td>S / Enter</td><td>stop &amp; finalize (raw copied instantly, refined copy follows)</td></tr>
