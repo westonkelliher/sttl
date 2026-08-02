@@ -233,6 +233,7 @@ class Transcriber:
     def __init__(self):
         self.models = {}
         self._lock = threading.Lock()
+        self._tx_lock = threading.Lock()   # one transcription at a time (models aren't thread-safe)
         self._fail_n = int(os.environ.get("STTL_FAIL_N", "0"))   # test hook: fail first N calls
 
     def _get(self, name: str):
@@ -265,12 +266,13 @@ class Transcriber:
             return f"<fake {model} {len(audio)/RATE:.1f}s>"
         m = self._get(model)
         try:
-            segs, _ = m.transcribe(
-                audio.astype(np.float32) / 32768.0,
-                beam_size=beam, best_of=1,
-                condition_on_previous_text=False, language="en",
-            )
-            return " ".join(s.text.strip() for s in segs).strip()
+            with self._tx_lock:
+                segs, _ = m.transcribe(
+                    audio.astype(np.float32) / 32768.0,
+                    beam_size=beam, best_of=1,
+                    condition_on_previous_text=False, language="en",
+                )
+                return " ".join(s.text.strip() for s in segs).strip()
         except RuntimeError as e:
             if "cuda" in str(e).lower() or "cublas" in str(e).lower():
                 from faster_whisper import WhisperModel
@@ -323,9 +325,16 @@ class Session:
 
     def __init__(self, broadcast):
         self.id = time.strftime("%Y%m%d_%H%M%S")
-        self.dir = DATA_DIR / "sessions" / self.id
+        d = DATA_DIR / "sessions" / self.id
+        n = 0
+        while d.exists():                  # two sessions within the same second
+            n += 1
+            d = DATA_DIR / "sessions" / f"{self.id}_{n}"
+        self.id = d.name
+        self.dir = d
         self.dir.mkdir(parents=True, exist_ok=True)
-        self.broadcast = broadcast
+        # every event carries the session id so stale sessions can't confuse the UI
+        self.broadcast = lambda ev, _b=broadcast: _b({"sid": self.id, **ev})
         self.lock = threading.RLock()
         self.status = "recording"          # recording|paused|finalizing|done|error
         self.error = None
@@ -366,6 +375,7 @@ class Session:
 
     def _record_loop(self):
         chunk = int(RATE * 0.1) * 2        # 100 ms
+        retries = 0
         try:
             self._rec_proc = self._spawn_source()
             while True:
@@ -381,6 +391,12 @@ class Session:
                         break
                     if self.status == "paused":
                         continue          # source was killed by pause()
+                    if retries < 3:       # mic may still be releasing from a prior session
+                        retries += 1
+                        time.sleep(0.4)
+                        self._kill_source()
+                        self._rec_proc = self._spawn_source()
+                        continue
                     raise RuntimeError("audio source ended unexpectedly (mic busy?)")
                 if self._stop_flag:
                     break
@@ -825,13 +841,17 @@ def health():
 
 @app.post("/api/start")
 def start():
+    """Always wins: an active recording is stopped (audio kept, finalizes in the
+    background) and a finalizing session is simply left behind — never a 409."""
     global session
     with session_lock:
-        if session and session.status in ("recording", "paused", "finalizing"):
-            return jsonify({"error": "session already active"}), 409
+        old = session
+        if old and old.status in ("recording", "paused"):
+            old.stop()
         session = Session(broadcast)
-    broadcast({"type": "status", "status": "recording", "session": session.id})
-    return jsonify({"ok": True, "id": session.id})
+        sid = session.id
+    broadcast({"type": "status", "status": "recording", "session": sid, "sid": sid})
+    return jsonify({"ok": True, "id": sid})
 
 
 @app.post("/api/pause")

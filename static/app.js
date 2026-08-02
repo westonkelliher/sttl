@@ -6,6 +6,7 @@ const state = { status: "idle", segments: [], windows: [], unified: [], elapsed:
                 cursor: 0, predictions: {} };
 let levelHist = [];
 let timerBase = 0, timerAnchor = null;
+let quickSid = null;   // quick mode auto-closes only for the session it started
 
 // ---------------- api
 
@@ -31,7 +32,6 @@ function setStatus(s) {
   const rec = s === "recording";
   $("btnRecord").classList.toggle("active", rec);
   $("recLabel").textContent = rec ? "Pause" : (s === "paused" ? "Resume" : "Start");
-  $("btnRecord").disabled = s === "finalizing";
   $("btnStop").disabled = !(rec || s === "paused");
   $("unified").contentEditable = s === "done" ? "plaintext-only" : "false";
   if (rec) { timerBase = state.elapsed; timerAnchor = performance.now(); }
@@ -211,7 +211,14 @@ function connect() {
     const m = JSON.parse(ev.data);
     if (m.type === "hello") {
       loadState();                       // resync after any reconnect
-    } else if (m.type === "level") {
+      return;
+    }
+    if (m.type === "status" && m.session && m.session !== state.sid) {
+      resetSession();                    // a new session started (any window): adopt it
+      state.sid = m.session;
+    }
+    if (m.sid && state.sid && m.sid !== state.sid) return;   // event from an old session
+    if (m.type === "level") {
       levelHist.push(m); if (levelHist.length > 90) levelHist.shift();
       state.elapsed = m.elapsed;
       timerBase = m.elapsed; timerAnchor = performance.now();
@@ -234,13 +241,12 @@ function connect() {
     } else if (m.type === "calib") {
       state.calib = m; renderCalib();
     } else if (m.type === "status") {
-      if (m.status === "recording" && m.session) resetSession();
       setStatus(m.status);
       if (m.status === "done") {
         state.predictions = {};
         renderUnified();
         toast("Done — transcript copied to clipboard");
-        if (QUICK) setTimeout(() => window.close(), 1500);
+        if (QUICK && state.sid === quickSid) setTimeout(() => window.close(), 1500);
       }
       if (m.status === "error") toast("Error: " + m.error, true);
     } else if (m.type === "raw_ready") {
@@ -286,13 +292,16 @@ function unifiedText() {
   return state.unified.map(c => c.text).join("\n\n").trim();
 }
 
+async function startNew() {
+  const r = await api("start", {});
+  if (r.error) return toast(r.error, true);
+  if (r.id && r.id !== state.sid) { resetSession(); state.sid = r.id; }
+  if (QUICK && quickSid === null) quickSid = r.id;
+}
+
 async function toggleRecord() {
   if (state.status === "recording" || state.status === "paused") await api("pause", {});
-  else if (state.status !== "finalizing") {
-    const r = await api("start", {});
-    if (r.error) toast(r.error, true);
-    else if (r.id) state.sid = r.id;
-  }
+  else await startNew();   // idle, done, error, or finalizing (old one detaches)
 }
 
 async function stopRecord() {
@@ -401,7 +410,7 @@ renderAll();
 renderTimer();
 connect();
 loadState().then(() => {
-  // recording starts on open by default (?noauto=1 disables). Covers ?quick=1 too,
-  // which additionally auto-closes the window when done.
-  if (!NOAUTO && ["idle", "done", "error"].includes(state.status)) toggleRecord();
+  // open = record (?noauto=1 disables): always a fresh session, even if an old one
+  // is live or wedged. ?quick=1 additionally auto-closes the window when done.
+  if (!NOAUTO) startNew();
 });
