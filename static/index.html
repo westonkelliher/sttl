@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sttl — long-form dictation</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/theme.css">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <div class="brand">sttl</div>
+  <div class="timer" id="timer">00:00</div>
+  <div class="status-pill" id="statusPill"><span class="dot"></span><span id="statusText">idle</span></div>
+  <div class="calib" id="calib" title="VAD calibration">uncalibrated</div>
+  <div class="spacer"></div>
+  <button id="btnHistory" class="ghost" title="Past sessions (H)">history</button>
+  <button id="btnHelp" class="ghost" title="Hotkeys (?)">?</button>
+</header>
+
+<div class="controls">
+  <button id="btnRecord" class="record" title="Space">
+    <span class="rec-icon"></span><span id="recLabel">Start</span>
+  </button>
+  <button id="btnStop" class="stop" title="S" disabled>Stop</button>
+  <canvas id="meter" width="360" height="34"></canvas>
+  <div class="meter-note" id="meterNote">speak normally for the first few seconds — it calibrates the silence detector</div>
+</div>
+
+<div class="timeline" id="timeline"></div>
+
+<main>
+  <section class="unified-pane">
+    <div class="pane-head">
+      <span>Unified transcript</span>
+      <span class="pane-actions">
+        <button id="btnCopy" class="ghost" title="Copy (C)">copy</button>
+        <button id="btnDownload" class="ghost" title="Download .md (D)">download</button>
+      </span>
+    </div>
+    <div class="unified" id="unified"><span class="placeholder">Press Start (or Space) to begin.</span></div>
+  </section>
+
+  <section class="passes-pane" id="passesPane">
+    <div class="pane-head clickable" id="passesToggle"><span>Passes <span class="caret" id="passesCaret">▾</span></span></div>
+    <div class="passes" id="passes"></div>
+  </section>
+</main>
+
+<footer>
+  <span><b>Space</b> start/pause</span><span><b>S/Enter</b> stop</span><span><b>C</b> copy</span>
+  <span><b>D</b> download</span><span><b>P</b> passes</span><span><b>H</b> history</span><span><b>?</b> help</span>
+</footer>
+
+<div class="overlay" id="helpOverlay">
+  <div class="modal">
+    <h2>sttl</h2>
+    <p>Long-form dictation. Audio is saved every ~8s. Silence is cut (with a safety buffer).
+    Each region is transcribed twice — aligned windows and half-offset windows — and an LLM
+    merges both passes into the unified transcript, progressively.</p>
+    <table>
+      <tr><td>Space</td><td>start / pause / resume</td></tr>
+      <tr><td>S / Enter</td><td>stop &amp; finalize (raw copied instantly, refined copy follows)</td></tr>
+      <tr><td>C</td><td>copy unified transcript</td></tr>
+      <tr><td>D</td><td>download as markdown</td></tr>
+      <tr><td>P</td><td>toggle passes panel</td></tr>
+      <tr><td>H</td><td>history</td></tr>
+      <tr><td>Esc</td><td>close dialogs</td></tr>
+    </table>
+    <p class="dim">Sessions live in ~/.local/share/sttl/sessions/</p>
+  </div>
+</div>
+
+<div class="overlay" id="historyOverlay">
+  <div class="modal wide">
+    <h2>Sessions</h2>
+    <div id="historyList" class="history-list"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

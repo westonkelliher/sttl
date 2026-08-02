@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# sttl: long-form dual-pass dictation. Opens the UI, or quick-capture modes.
+set -euo pipefail
+
+PORT="${STTL_PORT:-7737}"
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DATA="$HOME/.local/share/sttl"
+URL="http://127.0.0.1:$PORT"
+C_ACC=$'\033[38;2;110;200;230m'; C_OK=$'\033[38;2;94;199;106m'
+C_DIM=$'\033[38;2;138;138;138m'; C_ERR=$'\033[38;2;230;85;90m'; C_RST=$'\033[0m'
+
+mkdir -p "$DATA"
+
+ensure_server() {
+    if ! curl -sf "$URL/api/health" >/dev/null 2>&1; then
+        nohup python3 "$DIR/server.py" >> "$DATA/server.log" 2>&1 &
+        for _ in $(seq 1 50); do
+            curl -sf "$URL/api/health" >/dev/null 2>&1 && break
+            sleep 0.1
+        done
+        if ! curl -sf "$URL/api/health" >/dev/null 2>&1; then
+            echo "${C_ERR}error: server failed to start; last log lines:${C_RST}" >&2
+            tail -5 "$DATA/server.log" >&2
+            exit 1
+        fi
+    fi
+}
+
+status_of() {
+    curl -s "$URL/api/state" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status","?"))' 2>/dev/null || echo "?"
+}
+
+case "${1:-}" in
+    -h|--help)
+        echo "Usage: sttl             open the UI (starts server if needed)"
+        echo "       sttl -q          quick capture in terminal (Enter to finish)"
+        echo "       sttl -w          quick capture window (auto-start, auto-close)"
+        echo "       sttl --last      print last transcript"
+        echo "       sttl --stop      stop the server"
+        exit 0 ;;
+    --stop)
+        pkill -f "python3 $DIR/server.py" 2>/dev/null && echo "stopped" || echo "not running"
+        exit 0 ;;
+    --last)
+        last=$(ls -1d "$DATA/sessions"/*/ 2>/dev/null | sort | tail -1)
+        [[ -n "$last" && -f "$last/unified.md" ]] && cat "$last/unified.md" || echo "no sessions" >&2
+        exit 0 ;;
+    -q|--quick)
+        ensure_server
+        if ! curl -s -X POST "$URL/api/start" | grep -q '"ok"'; then
+            echo "${C_ERR}error: a session is already active${C_RST}" >&2; exit 1
+        fi
+        echo "${C_ACC}● Recording...${C_RST} ${C_DIM}Enter to finish${C_DIM}${C_RST}"
+        read -rs </dev/tty
+        curl -s -X POST "$URL/api/stop" >/dev/null
+        printf "%s" "${C_DIM}transcribing${C_RST}"
+        for _ in $(seq 1 360); do
+            [[ "$(status_of)" == "done" ]] && break
+            printf "."; sleep 0.5
+        done
+        echo ""
+        curl -s "$URL/api/last"; echo ""
+        echo "${C_OK}✓ Copied to clipboard${C_RST}"
+        exit 0 ;;
+    -w|--window)
+        ensure_server
+        nohup google-chrome --app="$URL/?quick=1" >/dev/null 2>&1 &
+        disown
+        exit 0 ;;
+esac
+
+ensure_server
+nohup google-chrome --app="$URL" >/dev/null 2>&1 &
+disown

@@ -1,0 +1,34 @@
+/* sttl theme — all colors live here. Dark, matched to stt's oklab-tuned scheme. */
+:root {
+  --bg:          #14171a;
+  --bg-raised:   #1c2126;
+  --bg-inset:    #0f1114;
+  --border:      #2a3138;
+  --border-soft: #22282e;
+
+  --text:        #d5dce2;
+  --text-dim:    #8a949d;
+  --text-faint:  #5a636b;
+
+  --accent:      #6ec8e6;   /* recording cyan */
+  --accent-dim:  #3a6a7a;
+  --green:       #5ec76a;   /* done / success */
+  --amber:       #e6a44c;   /* transcribing / warnings */
+  --red:         #e6555a;   /* stop / errors */
+  --violet:      #b48ae6;   /* unified text accent */
+
+  --seg-recorded:    #3d4650;
+  --seg-analyzed:    #4a6a8a;
+  --seg-transcribing:#e6a44c;
+  --seg-done:        #5ec76a;
+  --seg-empty:       #2a3138;
+  --seg-failed:      #e6555a;
+
+  --level-bar:   #6ec8e6;
+  --level-quiet: #3d4650;
+  --level-thresh:#e6a44c;
+
+  --font-ui:   system-ui, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+  --font-read: Georgia, "Times New Roman", serif;
+}
