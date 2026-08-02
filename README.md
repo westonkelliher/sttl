@@ -25,7 +25,7 @@ google-chrome. LLM merge wants a MiniMax key at `~/.keys/.minimax2.5_tool_caller
 - Click a timeline segment to replay its audio; transcript is editable after stop
 - Data: `~/.local/share/sttl/sessions/<id>/` (wavs, session.json, unified.md) + `history.log` TSV
 - `sttl --last` prints newest transcript; `sttl --stop` kills the server
-- Env: STTL_MODEL/BEAM (medium/5, pass A), STTL_MODEL_B/BEAM_B (small/8, pass B),
+- Env: STTL_MODEL/BEAM (medium/5, pass A), STTL_MODEL_B/BEAM_B (small/1, pass B),
   STTL_SEG_SECONDS (8), STTL_PORT (7737),
   STTL_UNIFY_MIN/MAX (1/6), STTL_DATA; test hooks: STTL_FAKE_STT/FAKE_LLM/INPUT_WAV/SPEED/FAIL_ONCE
 - Colors: `static/theme.css`
