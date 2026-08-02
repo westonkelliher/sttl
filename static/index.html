@@ -43,7 +43,10 @@
 
   <section class="passes-pane" id="passesPane">
     <div class="pane-head clickable" id="passesToggle"><span>Passes <span class="caret" id="passesCaret">▾</span></span></div>
-    <div class="passes" id="passes"></div>
+    <div class="passes" id="passes">
+      <div class="pass-line-wrap"><span class="pass-lbl" title="Pass A — aligned windows">A</span><div class="pass-line" id="passLineA"></div></div>
+      <div class="pass-line-wrap"><span class="pass-lbl" title="Pass B — half-offset windows">B</span><div class="pass-line b" id="passLineB"></div></div>
+    </div>
   </section>
 </main>
 
@@ -71,7 +74,9 @@
       <tr><td>H</td><td>history</td></tr>
       <tr><td>Esc</td><td>close dialogs</td></tr>
     </table>
-    <p class="dim">Sessions live in ~/.local/share/sttl/sessions/</p>
+    <p class="dim">Recording starts on open (add ?noauto=1 or use <b>sttl -n</b> to disable).
+    Domain terms in ~/.config/sttl/keywords.md are fed to the merge LLM.
+    Sessions live in ~/.local/share/sttl/sessions/</p>
   </div>
 </div>
 

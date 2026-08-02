@@ -40,7 +40,7 @@ MODEL_NAME = os.environ.get("STTL_MODEL", "medium")       # pass A
 BEAM = int(os.environ.get("STTL_BEAM", "5"))
 MODEL_NAME_B = os.environ.get("STTL_MODEL_B", "small")     # pass B: different model+beam
 BEAM_B = int(os.environ.get("STTL_BEAM_B", "8"))           # so the passes err differently
-UNIFY_MIN = int(os.environ.get("STTL_UNIFY_MIN", "2"))   # segments per LLM call (min)
+UNIFY_MIN = int(os.environ.get("STTL_UNIFY_MIN", "1"))   # segments per LLM call (min)
 UNIFY_MAX = int(os.environ.get("STTL_UNIFY_MAX", "6"))
 PORT = int(os.environ.get("STTL_PORT", "7737"))
 DATA_DIR = Path(os.environ.get("STTL_DATA", os.path.expanduser("~/.local/share/sttl")))
@@ -51,6 +51,8 @@ INPUT_SPEED = float(os.environ.get("STTL_SPEED", "1"))   # test: >1 feeds faster
 VAD_MODE = os.environ.get("STTL_VAD", "auto")            # auto = Silero neural, else "energy"
 PREDICT = os.environ.get("STTL_PREDICT", "1") == "1"     # live best-guess tail
 PREDICT_EVERY = float(os.environ.get("STTL_PREDICT_EVERY", "2.5"))
+KEYWORDS_FILE = Path(os.path.expanduser(
+    os.environ.get("STTL_KEYWORDS", "~/.config/sttl/keywords.md")))
 KEY_FILE = os.path.expanduser("~/.keys/.minimax2.5_tool_caller")
 MINIMAX_URL = "https://api.minimax.io/v1/chat/completions"
 
@@ -279,6 +281,14 @@ class Transcriber:
 
 
 TRANSCRIBER = Transcriber()   # shared across sessions; model loads once
+
+
+def load_keywords() -> str:
+    """User-maintained domain terms fed to the unify LLM (~/.config/sttl/keywords.md)."""
+    try:
+        return KEYWORDS_FILE.read_text().strip()[:2000]
+    except OSError:
+        return ""
 
 
 def call_minimax(system: str, user: str) -> str:
@@ -629,21 +639,24 @@ class Session:
 
     # ---------------- unification
 
-    def _ready_frontier(self):
+    def _ready_frontier(self, flush=False):
         n = len(self.segments)
         f = 0
         while f < n:
             if self.segments[f]["state"] not in ("done", "empty", "failed"):
                 break
-            if f < n - 1 and self.windows[f]["state"] not in ("done", "skipped", "failed"):
-                break
+            if f < n - 1:
+                if self.windows[f]["state"] not in ("done", "skipped", "failed"):
+                    break
+            elif not flush:
+                break   # newest segment: its trailing pass-B window doesn't exist yet
             f += 1
         return f
 
     def _maybe_unify(self, flush=False):
         while True:
             with self.lock:
-                f = self._ready_frontier()
+                f = self._ready_frontier(flush)
                 n = len(self.segments)
                 finished = flush
                 u = self.unify_cursor
@@ -659,7 +672,7 @@ class Session:
                     s = self.segments[i]
                     if s["passA"]:
                         a_parts.append(f"[{fmt_ts(s['t0'])}] {s['passA']}")
-                for wi in range(max(0, u - 1), min(v - 1, len(self.windows))):
+                for wi in range(max(0, u - 1), min(v, len(self.windows))):
                     w = self.windows[wi]
                     if w["text"]:
                         mid = self.segments[wi]["t0"] + self.segments[wi]["dur"] / 2
@@ -669,7 +682,10 @@ class Session:
                 with self.lock:
                     self.unify_cursor = v
                 continue
-            user = (f"PREVIOUS CONTEXT (already final, do not repeat):\n...{context}\n\n"
+            kw = load_keywords()
+            user = ((f"DOMAIN KEYWORDS/CONTEXT (terms the speaker likely says; prefer these "
+                     f"spellings when the audio is ambiguous):\n{kw}\n\n" if kw else "")
+                    + f"PREVIOUS CONTEXT (already final, do not repeat):\n...{context}\n\n"
                     f"PASS A (aligned windows, timestamps are window starts):\n" + "\n".join(a_parts) +
                     "\n\nPASS B (half-offset windows, timestamps are window starts):\n" +
                     ("\n".join(b_parts) if b_parts else "(none)") +

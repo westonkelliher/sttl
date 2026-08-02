@@ -32,7 +32,8 @@ status_of() {
 
 case "${1:-}" in
     -h|--help)
-        echo "Usage: sttl             open the UI (starts server if needed)"
+        echo "Usage: sttl             open the UI, recording immediately (starts server if needed)"
+        echo "       sttl -n          open the UI without auto-recording"
         echo "       sttl -q          quick capture in terminal (Enter to finish)"
         echo "       sttl -w          quick capture window (auto-start, auto-close)"
         echo "       sttl --last      print last transcript"
@@ -61,6 +62,11 @@ case "${1:-}" in
         echo ""
         curl -s "$URL/api/last"; echo ""
         echo "${C_OK}✓ Copied to clipboard${C_RST}"
+        exit 0 ;;
+    -n|--no-record)
+        ensure_server
+        nohup google-chrome --app="$URL/?noauto=1" >/dev/null 2>&1 &
+        disown
         exit 0 ;;
     -w|--window)
         ensure_server

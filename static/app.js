@@ -1,6 +1,7 @@
 /* sttl frontend: SSE-driven progressive UI. */
 const $ = (id) => document.getElementById(id);
 const QUICK = new URLSearchParams(location.search).has("quick");
+const NOAUTO = new URLSearchParams(location.search).has("noauto");
 const state = { status: "idle", segments: [], windows: [], unified: [], elapsed: 0, calib: {},
                 cursor: 0, predictions: {} };
 let levelHist = [];
@@ -140,26 +141,35 @@ function renderUnified() {
   u.scrollTop = u.scrollHeight;
 }
 
+function passCell(t0, text, pending, onclick) {
+  const c = document.createElement("span");
+  c.className = "cell" + (pending ? " pending" : "");
+  c.innerHTML = `<span class="t">${fmt(t0)}</span>` + esc(text);
+  if (onclick) { c.onclick = onclick; c.title = "click to play"; }
+  return c;
+}
+
 function renderPasses() {
-  const p = $("passes");
-  p.innerHTML = "";
+  // two horizontal timelines: pass A (aligned windows) over pass B (half-offset)
+  const la = $("passLineA"), lb = $("passLineB");
+  la.innerHTML = ""; lb.innerHTML = "";
   for (const s of state.segments) {
-    const row = document.createElement("div");
-    row.className = "pass-row";
-    const w = state.windows[s.i];  // window i starts at seg i midpoint
     const a = s.state === "empty" ? "· silence ·"
       : s.state === "failed" ? "· failed ·"
       : s.passA != null ? s.passA : "…";
-    const b = w == null ? ""
-      : w.state === "failed" ? "· failed ·"
-      : (w.text != null ? (w.text || "· silence ·") : "…");
-    row.innerHTML =
-      `<span class="t">${fmt(s.t0)}</span>` +
-      `<span class="a ${s.passA == null && s.state !== "empty" ? "pending" : ""}">${esc(a)}</span>` +
-      `<span class="b ${w && w.text == null ? "pending" : ""}">${esc(b)}</span>`;
-    p.appendChild(row);
+    la.appendChild(passCell(s.t0, a, s.passA == null && s.state !== "empty",
+      () => playSeg(s.i)));
   }
-  p.scrollTop = p.scrollHeight;
+  for (const w of state.windows) {
+    if (!w) continue;
+    const s = state.segments[w.i];  // window i starts at seg i midpoint
+    const mid = s ? s.t0 + s.dur / 2 : 0;
+    const b = w.state === "failed" ? "· failed ·"
+      : w.text != null ? (w.text || "· silence ·") : "…";
+    lb.appendChild(passCell(mid, b, w.text == null));
+  }
+  la.scrollLeft = la.scrollWidth;
+  lb.scrollLeft = lb.scrollWidth;
 }
 
 function esc(t) { const d = document.createElement("span"); d.textContent = t ?? ""; return d.innerHTML; }
@@ -391,6 +401,7 @@ renderAll();
 renderTimer();
 connect();
 loadState().then(() => {
-  // quick mode (?quick=1): open → already recording; Enter/S stops; window closes when done
-  if (QUICK && state.status === "idle") toggleRecord();
+  // recording starts on open by default (?noauto=1 disables). Covers ?quick=1 too,
+  // which additionally auto-closes the window when done.
+  if (!NOAUTO && ["idle", "done", "error"].includes(state.status)) toggleRecord();
 });
