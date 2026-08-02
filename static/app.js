@@ -47,7 +47,12 @@ function renderTimer() {
 function renderCalib() {
   const c = state.calib || {};
   const el = $("calib");
-  if (!c.calibrated) { el.textContent = "uncalibrated"; el.className = "calib"; return; }
+  if (!c.calibrated) {
+    const active = state.status === "recording" || state.status === "paused";
+    el.textContent = active ? "calibrating…" : "uncalibrated";
+    el.className = "calib";
+    return;
+  }
   el.textContent = c.low_signal ? "calibrated (low signal!)" : "calibrated";
   el.className = "calib " + (c.low_signal ? "low" : "ok");
   if (c.calibrated) $("meterNote").textContent = "";
@@ -301,6 +306,12 @@ function download() {
   a.click();
 }
 
+async function recalibrate() {
+  const r = await api("recalibrate", {});
+  if (r.error) return toast(r.error, true);
+  toast("Recalibrating — speak normally for the next few seconds");
+}
+
 async function showHistory() {
   const list = await api("sessions");
   const el = $("historyList");
@@ -346,6 +357,7 @@ $("btnStop").onclick = stopRecord;
 $("btnCopy").onclick = copyUnified;
 $("btnDownload").onclick = download;
 $("btnHelp").onclick = () => $("helpOverlay").classList.toggle("open");
+$("calib").onclick = recalibrate;
 $("btnHistory").onclick = showHistory;
 $("passesToggle").onclick = () => {
   const p = $("passesPane");
@@ -362,6 +374,7 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "s" || e.key === "S") stopRecord();
   else if (e.key === "c" || e.key === "C") copyUnified();
   else if (e.key === "d" || e.key === "D") download();
+  else if (e.key === "r" || e.key === "R") recalibrate();
   else if (e.key === "p" || e.key === "P") $("passesToggle").click();
   else if (e.key === "h" || e.key === "H") showHistory();
   else if (e.key === "?") $("helpOverlay").classList.toggle("open");

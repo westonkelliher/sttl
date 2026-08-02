@@ -695,6 +695,12 @@ class Session:
 
     # ---------------- controls & state
 
+    def recalibrate(self):
+        """Discard the learned threshold; the next segment does a full calibration."""
+        with self.lock:
+            self.calib.calibrated = False
+        self.broadcast({"type": "calib", **self.calib.snapshot()})
+
     def toggle_pause(self):
         with self.lock:
             if self.status == "recording":
@@ -817,6 +823,14 @@ def pause():
     if session:
         session.toggle_pause()
     return jsonify({"ok": True})
+
+
+@app.post("/api/recalibrate")
+def recalibrate():
+    if session and session.status in ("recording", "paused"):
+        session.recalibrate()
+        return jsonify({"ok": True})
+    return jsonify({"error": "no active session"}), 409
 
 
 @app.post("/api/stop")

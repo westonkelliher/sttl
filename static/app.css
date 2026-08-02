@@ -23,7 +23,8 @@ header { display: flex; align-items: center; gap: 16px; }
 .status-pill.error .dot { background: var(--red); }
 @keyframes pulse { 50% { opacity: 0.3; } }
 
-.calib { font-size: 12px; color: var(--text-faint); font-family: var(--font-mono); }
+.calib { font-size: 12px; color: var(--text-faint); font-family: var(--font-mono); cursor: pointer; }
+.calib:hover { text-decoration: underline; }
 .calib.ok { color: var(--green); }
 .calib.low { color: var(--amber); }
 
